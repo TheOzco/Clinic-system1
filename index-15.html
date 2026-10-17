@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>مدیریت کلینیک</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1b1f24;--mut:#6b7280;--pri:#0f766e;--bd:#e5e7eb;--red:#dc2626}
+@media(prefers-color-scheme:dark){:root{--bg:#111418;--card:#1a1f26;--tx:#e8eaed;--mut:#9aa3af;--bd:#2a313b}}
+*{box-sizing:border-box}
+body{margin:0;font-family:Tahoma,system-ui,sans-serif;background:var(--bg);color:var(--tx);padding-bottom:70px}
+header{padding:14px 16px;font-weight:bold;background:var(--pri);color:#fff}
+nav{position:fixed;bottom:0;inset-inline:0;display:flex;background:var(--card);border-top:1px solid var(--bd)}
+nav button{flex:1;padding:14px 4px;border:0;background:none;color:var(--mut);font:inherit}
+nav button.on{color:var(--pri);font-weight:bold}
+main{padding:12px;max-width:720px;margin:auto}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px;margin-bottom:10px}
+input,select,textarea{width:100%;padding:10px;margin:4px 0;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx);font:inherit}
+button.b{padding:9px 14px;border:0;border-radius:8px;background:var(--pri);color:#fff;font:inherit}
+button.r{background:var(--red)} button.g{background:var(--mut)}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.row>*{flex:1} .row>button{flex:0 0 auto}
+.dot{display:inline-block;width:14px;height:14px;border-radius:50%;border:1px solid var(--mut);vertical-align:middle;margin-inline-end:6px}
+.bar{height:10px;background:var(--bd);border-radius:6px;overflow:hidden;margin:6px 0}
+.bar i{display:block;height:100%;background:var(--pri)}
+.mut{color:var(--mut);font-size:.85em}
+h3{margin:14px 0 6px}
+.item{cursor:pointer}
+</style>
+</head>
+<body>
+<header id="title">مدیریت کلینیک</header>
+<div id="demo" style="display:none;background:#fef3c7;color:#92400e;padding:8px 12px;font-size:.85em">نسخه نمایشی: بدون سرور، داده‌ها فقط روی همین مرورگر ذخیره می‌شن.</div>
+<main id="app"></main>
+<nav>
+  <button data-t="clients" class="on">مشتری‌ها</button>
+  <button data-t="services">خدمات</button>
+  <button data-t="tiers">رتبه‌ها</button>
+</nav>
+<script>
+let TOKEN = localStorage.getItem('tok') || '';
+let S = {cats:[],svcs:[],tiers:[],td:[],clients:[]};
+let tab = 'clients';
+const $ = s => document.querySelector(s);
+const fmt = n => Number(n||0).toLocaleString('fa-IR');
+const esc = s => String(s??'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+let LOCAL = false;
+async function api(path, method='GET', body){
+  if(!LOCAL){
+    let r;
+    try{ r = await fetch('/api/'+path,{method,headers:{'Content-Type':'application/json','X-Token':TOKEN},body:body?JSON.stringify(body):undefined});
+         if(r.status===404 && !(r.headers.get('content-type')||'').includes('json')) throw 0; }
+    catch(e){ LOCAL = true; $('#demo').style.display='block'; }
+    if(!LOCAL){
+      if(r.status===401){ TOKEN = prompt('رمز دسترسی:')||''; localStorage.setItem('tok',TOKEN); return api(path,method,body); }
+      const j = await r.json();
+      if(!r.ok){ alert(j.error||'خطا'); throw j; }
+      return j;
+    }
+  }
+  return localApi(path,method,body);
+}
+
+/* ---------- حالت نمایشی: بدون سرور، داده‌ها در مرورگر ---------- */
+const TB=['categories','services','tiers','tier_discounts','clients','treatments','sessions','payments'];
+function seedLocal(){
+  const d={}; TB.forEach(t=>d[t]=[]);
+  const add=(t,id,o)=>d[t].push({id,...o,created_at:new Date().toISOString(),deleted:0});
+  ['لیزر','ماساژ','پوست','مو'].forEach((n,i)=>add('categories','cat-'+i,{name:n,sort:i}));
+  [['cat-0','لیزر زیر بغل',500000,8],['cat-0','لیزر پا',1500000,8],['cat-0','لیزر صورت',700000,8],['cat-0','لیزر تمام بدن',4000000,8],
+   ['cat-1','ماساژ سوئدی',800000,1],['cat-1','ماساژ ریلکسی',700000,1],['cat-2','پاکسازی پوست',600000,1],['cat-2','میکرونیدلینگ',1800000,4],
+   ['cat-3','مزوتراپی مو',2000000,6],['cat-3','PRP مو',2500000,4]]
+   .forEach((x,i)=>add('services','svc-'+i,{category_id:x[0],name:x[1],price:x[2],sessions:x[3],active:1}));
+  [['سفید','#ffffff',0],['سبز','#2ecc71',5],['آبی','#3498db',10],['بنفش','#9b59b6',15],['طلایی','#f1c40f',20]]
+   .forEach((x,i)=>add('tiers','tier-'+i,{name:x[0],color:x[1],discount:x[2]}));
+  return d;
+}
+function ldb(){ let d=localStorage.getItem('demo_db'); if(d){ d=JSON.parse(d); TB.forEach(t=>{ if(!d[t]) d[t]=[]; }); return d; } d=seedLocal(); lsave(d); return d; }
+function lsave(d){ localStorage.setItem('demo_db',JSON.stringify(d)); }
+const live=(d,t)=>d[t].filter(r=>!r.deleted);
+function lDiscount(d,tierId,svcId){
+  const o=live(d,'tier_discounts').find(x=>x.tier_id===tierId&&x.service_id===svcId);
+  if(o&&o.discount!==''&&o.discount!=null) return Number(o.discount);
+  const t=d.tiers.find(x=>x.id===tierId); return t?Number(t.discount||0):0;
+}
+function lDetail(d,id){
+  const c=live(d,'clients').find(x=>x.id===id); if(!c) return null;
+  c.tier=d.tiers.find(x=>x.id===c.tier_id)||null;
+  c.treatments=live(d,'treatments').filter(t=>t.client_id===id).map(t=>{
+    const sv=d.services.find(x=>x.id===t.service_id)||{};
+    const ses=live(d,'sessions').filter(x=>x.treatment_id===t.id);
+    const total=Number(t.total||0);
+    ses.sort((a,b)=>a.done_at<b.done_at?-1:1);
+    return {...t,service_name:sv.name,done:ses.length,remaining:Math.max(total-ses.length,0),sessions:ses};
+  });
+  c.payments=live(d,'payments').filter(x=>x.client_id===id).sort((a,b)=>a.paid_at<b.paid_at?-1:1);
+  c.total_cost=c.treatments.reduce((n,t)=>n+Number(t.price_paid||0),0);
+  c.total_paid=c.payments.reduce((n,p)=>n+Number(p.amount||0),0);
+  c.balance=c.total_cost-c.total_paid;
+  return c;
+}
+async function localApi(path,method,body){
+  const d=ldb(), parts=path.split('/'), t=parts[0], id=parts[1];
+  let out;
+  if(t==='client'){ out=lDetail(d,id); }
+  else if(t==='card'){
+    const c=live(d,'clients').find(x=>x.card_uid===decodeURIComponent(id));
+    if(!c){ alert('کارت ناشناس'); throw {error:'not found'}; }
+    out=lDetail(d,c.id);
+  }
+  else if(t==='price'){
+    const c=d.clients.find(x=>x.id===id), sv=d.services.find(x=>x.id===parts[2]);
+    const dis=lDiscount(d,c.tier_id,sv.id), p=Number(sv.price||0);
+    out={price:p,discount:dis,final:Math.round(p*(1-dis/100))};
+  }
+  else if(TB.includes(t)){
+    if(method==='GET') out=live(d,t);
+    else if(method==='POST'){
+      if(t==='clients'&&body.card_uid&&live(d,'clients').some(x=>x.card_uid===body.card_uid)){ alert('این کارت قبلاً ثبت شده'); throw {error:'dup'}; }
+      if(t==='sessions'&&!body.done_at) body.done_at=new Date().toISOString();
+      if(t==='payments'&&!body.paid_at) body.paid_at=new Date().toISOString();
+      out={id:'l'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),...body,created_at:new Date().toISOString(),deleted:0};
+      d[t].push(out);
+    }
+    else if(method==='PUT'){
+      if(t==='clients'&&body.card_uid&&live(d,'clients').some(x=>x.card_uid===body.card_uid&&x.id!==id)){ alert('این کارت قبلاً ثبت شده'); throw {error:'dup'}; }
+      out=d[t].find(x=>x.id===id); Object.assign(out,body);
+    }
+    else if(method==='DELETE'){ const r=d[t].find(x=>x.id===id); if(r) r.deleted=1; out={ok:true}; }
+  }
+  lsave(d);
+  return JSON.parse(JSON.stringify(out));
+}
+async function load(){
+  [S.cats,S.svcs,S.tiers,S.td,S.clients] = await Promise.all(
+    ['categories','services','tiers','tier_discounts','clients'].map(t=>api(t)));
+  S.cats.sort((a,b)=>a.sort-b.sort);
+}
+window.onerror=(m)=>showErr('خطای صفحه: '+m);
+const tier = id => S.tiers.find(t=>t.id===id);
+const svc = id => S.svcs.find(s=>s.id===id);
+
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('nav button').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on'); tab=b.dataset.t;
+  if(location.hash) location.hash=''; else render();
+});
+window.addEventListener('hashchange',()=>render());
+
+function showErr(m){ $('#app').innerHTML='<div class="card" style="border-color:#dc2626">'+m+'</div>'; }
+async function render(){
+  try{ await load(); }catch(e){ if(!$('#app').innerHTML) showErr('خطا: '+(e&&e.message||e&&e.error||e)); return; }
+  if(location.hash.startsWith('#/c/')) return openClient(decodeURIComponent(location.hash.slice(4)));
+  if(tab==='clients') return renderClients();
+  if(tab==='services') return renderServices();
+  return renderTiers();
+}
+
+/* ---------- مشتری‌ها ---------- */
+function renderClients(q=''){
+  $('#title').textContent='مشتری‌ها';
+  const list = S.clients.filter(c=>(c.name+' '+(c.phone||'')+' '+(c.card_uid||'')).includes(q));
+  $('#app').innerHTML = `
+  <div class="card">
+    <input id="q" placeholder="جستجو: نام / موبایل / شماره کارت" value="${esc(q)}">
+    <div class="row"><input id="cardscan" placeholder="کارت را بخوانید (UID)"><button class="b" onclick="byCard()">باز کردن</button></div>
+  </div>
+  <div class="card"><b>مشتری جدید</b>
+    <input id="n" placeholder="نام"><input id="p" placeholder="موبایل">
+    <select id="t">${S.tiers.map(t=>`<option value="${t.id}">${esc(t.name)} (${t.discount}%)</option>`).join('')}</select>
+    <input id="u" placeholder="شماره/UID کارت (اختیاری)">
+    <button class="b" onclick="addClient()">ثبت</button></div>
+  ${list.map(c=>{const t=tier(c.tier_id)||{};return `<div class="card item" onclick="location.hash='#/c/${c.id}'">
+    <span class="dot" style="background:${t.color}"></span><b>${esc(c.name)}</b>
+    <div class="mut">${esc(c.phone||'')} · ${esc(t.name||'')} · کارت: ${esc(c.card_uid||'—')}</div></div>`}).join('')}`;
+  $('#q').oninput = e=>{renderClients(e.target.value); $('#q').focus()};
+}
+async function addClient(){
+  const name=$('#n').value.trim(); if(!name) return alert('نام را وارد کنید');
+  await api('clients','POST',{name,phone:$('#p').value,tier_id:$('#t').value,card_uid:$('#u').value||null});
+  render();
+}
+async function byCard(){
+  const u=$('#cardscan').value.trim(); if(!u) return;
+  try{ const c=await api('card/'+encodeURIComponent(u)); location.hash='#/c/'+c.id;}catch(e){}
+}
+const nowLocal=()=>{const d=new Date();d.setMinutes(d.getMinutes()-d.getTimezoneOffset());return d.toISOString().slice(0,16);};
+const toISO=v=>v?new Date(v).toISOString():null;
+const fdt=v=>v?new Date(v).toLocaleString('fa-IR',{dateStyle:'medium',timeStyle:'short'}):'—';
+const METHODS=['نقد','کارت‌خوان','کارت به کارت','چک','سایر'];
+
+async function openClient(id){
+  const c = await api('client/'+id), t=c.tier||{};
+  document.title=c.name; $('#title').textContent='پرونده مشتری';
+  $('#app').innerHTML = `
+  <button class="b g" onclick="location.hash=''">← لیست مشتری‌ها</button>
+  <div class="card" style="margin-top:10px">
+    <div style="font-size:1.25em"><span class="dot" style="background:${t.color}"></span><b>${esc(c.name)}</b></div>
+    <div class="mut">${esc(c.phone||'بدون موبایل')} · رتبه ${esc(t.name||'—')} (${t.discount||0}%) · کارت: ${esc(c.card_uid||'—')}</div>
+    ${c.notes?`<div style="margin-top:6px">${esc(c.notes)}</div>`:''}
+    <div class="row" style="margin-top:10px;text-align:center">
+      <div class="card" style="margin:0"><div class="mut">مبلغ دوره‌ها</div><b>${fmt(c.total_cost)}</b></div>
+      <div class="card" style="margin:0"><div class="mut">پرداخت‌شده</div><b style="color:var(--pri)">${fmt(c.total_paid)}</b></div>
+      <div class="card" style="margin:0"><div class="mut">مانده</div><b style="color:${c.balance>0?'var(--red)':'var(--pri)'}">${fmt(c.balance)}</b></div>
+    </div>
+    <details style="margin-top:10px"><summary class="mut">ویرایش مشخصات</summary>
+      <input id="en" value="${esc(c.name)}"><input id="ep" value="${esc(c.phone||'')}">
+      <select id="et">${S.tiers.map(x=>`<option value="${x.id}" ${x.id===c.tier_id?'selected':''}>${esc(x.name)}</option>`).join('')}</select>
+      <input id="eu" placeholder="UID کارت" value="${esc(c.card_uid||'')}">
+      <textarea id="eno" placeholder="یادداشت">${esc(c.notes||'')}</textarea>
+      <div class="row"><button class="b" onclick="saveClient('${id}')">ذخیره</button>
+      <button class="b r" onclick="delClient('${id}')">حذف مشتری</button></div></details>
+  </div>
+
+  <h3>روند درمان</h3>
+  ${c.treatments.map(x=>`<div class="card"><b>${esc(x.service_name)}</b>
+    <div class="bar"><i style="width:${x.total?100*x.done/x.total:0}%"></i></div>
+    <div>انجام‌شده: ${x.done} از ${x.total} · مانده: <b>${x.remaining}</b> · مبلغ دوره: ${fmt(x.price_paid)}</div>
+    ${x.sessions.length?`<ol style="margin:8px 0;padding-inline-start:22px">${x.sessions.map(se=>`<li>${fdt(se.done_at)}
+      <a class="mut" style="cursor:pointer" onclick="delSession('${se.id}','${id}')">✕</a></li>`).join('')}</ol>`:'<div class="mut">هنوز جلسه‌ای ثبت نشده</div>'}
+    <div class="row"><input type="datetime-local" id="sd${x.id}" value="${nowLocal()}">
+    <button class="b" ${x.remaining?'':'disabled'} onclick="addSession('${x.id}','${id}')">ثبت جلسه</button></div>
+    <button class="b r" style="margin-top:6px" onclick="delT('${x.id}','${id}')">حذف دوره</button></div>`).join('')||'<div class="mut">هنوز دوره‌ای ثبت نشده</div>'}
+  <div class="card"><b>دوره جدید</b>
+    <select id="ns" onchange="calc('${id}')">${S.cats.map(k=>`<optgroup label="${esc(k.name)}">${S.svcs.filter(s=>s.category_id===k.id&&s.active!=0).map(s=>`<option value="${s.id}" data-n="${s.sessions}">${esc(s.name)}</option>`).join('')}</optgroup>`).join('')}</select>
+    <input id="nt" type="number" min="1" placeholder="تعداد جلسات" oninput="calc('${id}')">
+    <input id="np" type="number" placeholder="مبلغ دوره (تومان)">
+    <div class="mut" id="info"></div>
+    <button class="b" onclick="addT('${id}')">ثبت دوره</button></div>
+
+  <h3>پرداخت‌ها</h3>
+  ${c.payments.map(p=>{const tr=c.treatments.find(x=>x.id===p.treatment_id);return `<div class="card">
+    <div class="row"><b style="flex:1">${fmt(p.amount)} تومان</b><span class="mut" style="flex:1">${esc(p.method||'')}</span>
+    <button class="b r" onclick="delPay('${p.id}','${id}')">حذف</button></div>
+    <div class="mut">${fdt(p.paid_at)}${tr?' · بابت '+esc(tr.service_name):''}${p.note?' · '+esc(p.note):''}</div></div>`}).join('')||'<div class="mut">پرداختی ثبت نشده</div>'}
+  <div class="card"><b>ثبت پرداخت</b>
+    <input id="pa" type="number" placeholder="مبلغ (تومان)">
+    <select id="pm">${METHODS.map(m=>`<option>${m}</option>`).join('')}</select>
+    <select id="pt"><option value="">کلی (بدون دوره مشخص)</option>${c.treatments.map(x=>`<option value="${x.id}">${esc(x.service_name)}</option>`).join('')}</select>
+    <input type="datetime-local" id="pd" value="${nowLocal()}">
+    <input id="pn" placeholder="توضیح (اختیاری)">
+    <button class="b" onclick="addPay('${id}')">ثبت پرداخت</button></div>`;
+  calc(id);
+}
+async function calc(cid){
+  const sel=$('#ns'); if(!sel||!sel.value) return;
+  if(typeof event!=='undefined' && event && event.target && event.target.id==='ns') $('#nt').value = sel.selectedOptions[0].dataset.n||1;
+  const n=+($('#nt').value||sel.selectedOptions[0].dataset.n||1);
+  if(!$('#nt').value) $('#nt').value=n;
+  const p=await api(`price/${cid}/${sel.value}`);
+  $('#np').value = p.final*n;
+  $('#info').textContent=`قیمت هر جلسه ${fmt(p.price)} · تخفیف رتبه ${p.discount}% · هر جلسه ${fmt(p.final)}`;
+}
+async function addT(cid){
+  await api('treatments','POST',{client_id:cid,service_id:$('#ns').value,total:$('#nt').value||1,price_paid:$('#np').value||0});
+  openClient(cid);
+}
+async function addSession(tid,cid){ await api('sessions','POST',{treatment_id:tid,done_at:toISO($('#sd'+tid).value)}); openClient(cid); }
+async function delSession(id,cid){ if(confirm('این جلسه حذف بشه؟')){ await api('sessions/'+id,'DELETE'); openClient(cid);} }
+async function delT(tid,cid){ if(confirm('حذف دوره؟')){ await api('treatments/'+tid,'DELETE'); openClient(cid);} }
+async function addPay(cid){
+  const a=$('#pa').value; if(!a||+a<=0) return alert('مبلغ را وارد کنید');
+  await api('payments','POST',{client_id:cid,treatment_id:$('#pt').value||null,amount:a,method:$('#pm').value,paid_at:toISO($('#pd').value),note:$('#pn').value});
+  openClient(cid);
+}
+async function delPay(id,cid){ if(confirm('این پرداخت حذف بشه؟')){ await api('payments/'+id,'DELETE'); openClient(cid);} }
+async function saveClient(id){
+  await api('clients/'+id,'PUT',{name:$('#en').value,phone:$('#ep').value,tier_id:$('#et').value,card_uid:$('#eu').value||null,notes:$('#eno').value});
+  openClient(id);
+}
+
+/* ---------- خدمات ---------- */
+function renderServices(){
+  $('#title').textContent='خدمات';
+  $('#app').innerHTML = S.cats.map(k=>`
+  <h3>${esc(k.name)}</h3>
+  ${S.svcs.filter(s=>s.category_id===k.id).map(s=>`<div class="card">
+    <input id="sn${s.id}" value="${esc(s.name)}">
+    <div class="row"><input id="sp${s.id}" type="number" value="${s.price||0}" placeholder="قیمت هر جلسه">
+    <input id="ss${s.id}" type="number" value="${s.sessions||1}" placeholder="جلسات پیش‌فرض"></div>
+    <label class="mut"><input type="checkbox" id="sa${s.id}" ${s.active!=0?'checked':''} style="width:auto"> فعال</label>
+    <div class="row"><button class="b" onclick="saveSvc('${s.id}')">ذخیره</button>
+    <button class="b r" onclick="delSvc('${s.id}')">حذف</button></div></div>`).join('')}
+  <div class="card"><b>خدمت جدید در «${esc(k.name)}»</b>
+    <input id="newn${k.id}" placeholder="نام خدمت">
+    <div class="row"><input id="newp${k.id}" type="number" placeholder="قیمت هر جلسه"><input id="news${k.id}" type="number" placeholder="جلسات"></div>
+    <button class="b" onclick="addSvc('${k.id}')">افزودن</button></div>`).join('')
+  + `<div class="card"><b>دسته جدید</b><input id="nc" placeholder="نام دسته"><button class="b" onclick="addCat()">افزودن</button></div>`;
+}
+async function saveSvc(id){ await api('services/'+id,'PUT',{name:$('#sn'+id).value,price:$('#sp'+id).value,sessions:$('#ss'+id).value,active:$('#sa'+id).checked?1:0}); render(); }
+async function delSvc(id){ if(confirm('حذف خدمت؟')){ await api('services/'+id,'DELETE'); render(); } }
+async function addSvc(k){ const n=$('#newn'+k).value.trim(); if(!n) return; await api('services','POST',{category_id:k,name:n,price:$('#newp'+k).value||0,sessions:$('#news'+k).value||1,active:1}); render(); }
+async function addCat(){ const n=$('#nc').value.trim(); if(!n) return; await api('categories','POST',{name:n,sort:S.cats.length}); render(); }
+
+/* ---------- رتبه‌ها ---------- */
+function renderTiers(){
+  $('#title').textContent='رتبه‌های رنگی و تخفیف';
+  $('#app').innerHTML = S.tiers.map(t=>`<div class="card">
+    <div class="row"><input id="tn${t.id}" value="${esc(t.name)}"><input type="color" id="tc${t.id}" value="${t.color}" style="max-width:60px;padding:2px">
+    <input id="td${t.id}" type="number" value="${t.discount}" style="max-width:80px"><span class="mut" style="flex:0">%</span></div>
+    <details><summary class="mut">تخفیف اختصاصی هر خدمت (خالی = تخفیف پیش‌فرض)</summary>
+    ${S.svcs.map(s=>{const o=S.td.find(x=>x.tier_id===t.id&&x.service_id===s.id);
+      return `<div class="row"><span style="flex:2">${esc(s.name)}</span><input type="number" id="x${t.id}_${s.id}" value="${o?o.discount:''}" placeholder="${t.discount}"></div>`}).join('')}
+    </details>
+    <div class="row" style="margin-top:8px"><button class="b" onclick="saveTier('${t.id}')">ذخیره</button>
+    <button class="b r" onclick="delTier('${t.id}')">حذف</button></div></div>`).join('')
+  + `<div class="card"><b>رتبه جدید</b><input id="ntn" placeholder="نام رنگ"><input id="ntc" type="color" value="#cccccc"><input id="ntd" type="number" placeholder="تخفیف پیش‌فرض %"><button class="b" onclick="addTier()">افزودن</button></div>`;
+}
+async function saveTier(id){
+  await api('tiers/'+id,'PUT',{name:$('#tn'+id).value,color:$('#tc'+id).value,discount:$('#td'+id).value||0});
+  for(const s of S.svcs){
+    const v=$(`#x${id}_${s.id}`).value, o=S.td.find(x=>x.tier_id===id&&x.service_id===s.id);
+    if(v!==''&&!o) await api('tier_discounts','POST',{tier_id:id,service_id:s.id,discount:v});
+    else if(v!==''&&o&&String(o.discount)!==v) await api('tier_discounts/'+o.id,'PUT',{discount:v});
+    else if(v===''&&o) await api('tier_discounts/'+o.id,'DELETE');
+  }
+  render();
+}
+async function addTier(){ const n=$('#ntn').value.trim(); if(!n) return; await api('tiers','POST',{name:n,color:$('#ntc').value,discount:$('#ntd').value||0}); render(); }
+async function delTier(id){ if(S.clients.some(c=>c.tier_id===id)) return alert('مشتری با این رتبه وجود دارد'); if(confirm('حذف رتبه؟')){ await api('tiers/'+id,'DELETE'); render(); } }
+
+render();
+</script>
+</body>
+</html>
